@@ -6,214 +6,54 @@ on:
   pull_request:
     branches: [ main, master ]
   schedule:
-    - cron: '0 0 * * 0'  # Run weekly on Sundays
-  workflow_dispatch:  # Allow manual trigger
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
 
 jobs:
   test:
-    name: Julia ${{ matrix.version }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        version: 
-          - '1.10'
-          - '1.11'
-        os:
-          - ubuntu-latest
-          - macOS-latest
-          - windows-latest
-        exclude:
-          # Optional: Exclude slow combinations if needed
-          - os: windows-latest
-            version: '1.11'
+        version: ['1.10', '1.11']
     
     steps:
-      # Step 1: Checkout repository
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       
-      # Step 2: Setup Julia
-      - name: Setup Julia
-        uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
-          arch: x64
       
-      # Step 3: Cache dependencies for faster builds
-      - name: Cache Julia dependencies
-        uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v2
         with:
           path: |
             ~/.julia/artifacts
             ~/.julia/packages
           key: ${{ runner.os }}-${{ matrix.version }}-${{ hashFiles('**/Project.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.version }}-
       
-      # Step 4: Instantiate project environment
-      - name: Instantiate project
-        run: |
-          julia --project=@. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-          julia --project=@. -e 'using Pkg; Pkg.status()'
+      - name: Install dependencies
+        run: julia --project=@. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
       
-      # Step 5: Run the activation comparison script
       - name: Run UDE Activation Comparison
         run: julia --project=@. 3-activations-comp.jl
-        timeout-minutes: 45  # Training can take time
-        env:
-          JULIA_NUM_THREADS: 2  # Limit threads for stability
+        timeout-minutes: 45
       
-      # Step 6: Verify all expected outputs are generated
       - name: Verify outputs
         run: |
-          echo "=========================================="
-          echo "Verifying generated files..."
-          echo "=========================================="
-          
-          # List all files for debugging
-          ls -la
-          
-          # Check for comparison plot
-          if [ -f "infected_recovered_comparison.png" ]; then
-            echo "✅ infected_recovered_comparison.png generated"
-            ls -lh infected_recovered_comparison.png
-          else
-            echo "❌ Missing infected_recovered_comparison.png"
-            exit 1
-          fi
-          
-          # Check for convergence plot
-          if [ -f "convergence_comparison.png" ]; then
-            echo "✅ convergence_comparison.png generated"
-            ls -lh convergence_comparison.png
-          else
-            echo "❌ Missing convergence_comparison.png"
-            exit 1
-          fi
-          
-          # Check for individual prediction plots
-          for activation in relu tanh sigmoid; do
-            if [ -f "${activation}_predictions.png" ]; then
-              echo "✅ ${activation}_predictions.png generated"
-              ls -lh ${activation}_predictions.png
+          for file in infected_recovered_comparison.png convergence_comparison.png relu_predictions.png tanh_predictions.png sigmoid_predictions.png comparison_results.jld2; do
+            if [ -f "$file" ]; then
+              echo "✅ $file generated"
             else
-              echo "❌ Missing ${activation}_predictions.png"
+              echo "❌ Missing $file"
               exit 1
             fi
           done
-          
-          # Check for results file
-          if [ -f "comparison_results.jld2" ]; then
-            echo "✅ comparison_results.jld2 generated"
-            ls -lh comparison_results.jld2
-          else
-            echo "❌ Missing comparison_results.jld2"
-            exit 1
-          fi
-          
-          echo "=========================================="
-          echo "All verification checks passed!"
-          echo "=========================================="
       
-      # Step 7: Display performance summary from logs
-      - name: Extract performance summary
-        if: always()
-        run: |
-          echo "=========================================="
-          echo "PERFORMANCE SUMMARY FROM RUN"
-          echo "=========================================="
-          # Extract the performance summary section from logs
-          grep -A 10 "PERFORMANCE SUMMARY" julia_log.txt 2>/dev/null || echo "Summary extraction skipped"
-        continue-on-error: true
-      
-      # Step 8: Upload all generated artifacts
       - name: Upload results
         uses: actions/upload-artifact@v4
-        if: always()  # Upload even if tests fail
+        if: always()
         with:
-          name: ude-activation-results-${{ matrix.os }}-julia-${{ matrix.version }}
+          name: ude-activation-results-julia-${{ matrix.version }}
           path: |
             *.png
             *.jld2
           retention-days: 7
-      
-      # Step 9: Upload logs for debugging
-      - name: Upload logs
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: logs-${{ matrix.os }}-julia-${{ matrix.version }}
-          path: |
-            *.log
-            julia_log.txt
-          retention-days: 3
-
-  # Optional: Run performance benchmark separately
-  benchmark:
-    name: Performance Benchmark
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Julia
-        uses: julia-actions/setup-julia@v2
-        with:
-          version: '1.10'
-      
-      - name: Cache dependencies
-        uses: julia-actions/cache@v2
-        with:
-          path: |
-            ~/.julia/artifacts
-            ~/.julia/packages
-          key: benchmark-${{ hashFiles('**/Project.toml') }}
-      
-      - name: Install dependencies
-        run: |
-          julia --project=@. -e 'using Pkg; Pkg.instantiate()'
-      
-      - name: Run benchmark
-        run: |
-          echo "Running performance benchmark..."
-          julia --project=@. -e '
-            include("3-activations-comp.jl")
-            # Add benchmark tracking here if needed
-          '
-        timeout-minutes: 60
-      
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: |
-            *.png
-            *.jld2
-          retention-days: 30
-
-  # Notify on failure (optional)
-  notify:
-    name: Notification
-    runs-on: ubuntu-latest
-    needs: [test, benchmark]
-    if: failure() && github.event_name == 'push'
-    
-    steps:
-      - name: Create issue on failure
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `CI Pipeline Failed - ${new Date().toISOString()}`,
-              body: `The CI pipeline failed on ${context.payload.repository?.html_url || 'the repository'}.
-              
-              Please check the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.
-              
-              Failed jobs: test, benchmark
-              `
-            })
