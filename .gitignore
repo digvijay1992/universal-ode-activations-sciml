@@ -1,0 +1,33 @@
+# Julia generated files
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+*.jl.old
+*.jl.bak
+LocalPreferences.toml
+
+# Artifacts
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.backup
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Note: Manifest.toml is NOT ignored (good for reproducibility)
+# Note: Project.toml is NOT ignored
+# Note: SIR_model.png is NOT ignored
